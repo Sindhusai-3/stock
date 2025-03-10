@@ -1,21 +1,15 @@
-from flask import Flask, render_template, jsonify
-import yfinance as yf
-
-app = Flask(__name__)
-
-# List of NIFTY 50 stocks
-STOCKS = ["RELIANCE", "TCS", "INFY", "HDFCBANK", "ICICIBANK"]
-
 @app.route("/")
 def home():
-    return """
-    <!DOCTYPE html>
+    return """<!DOCTYPE html>
     <html lang="en">
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>NIFTY 50 Stock Chart</title>
         <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+        <style>
+            select { padding: 10px; margin: 20px; } /* Moved CSS into <style> */
+        </style>
     </head>
     <body>
 
@@ -82,25 +76,3 @@ def home():
     </body>
     </html>
     """
-
-@app.route("/stocks")
-def get_stock_list():
-    return jsonify(STOCKS)
-
-@app.route("/stock/<symbol>")
-def get_stock(symbol):
-    try:
-        data = yf.download(f"{symbol}.NS", period="1mo")
-        if data.empty:
-            return jsonify({"error": "No data available"})
-
-        # Convert data to JSON format
-        data = data["Close"].reset_index()
-        data["Date"] = data["Date"].astype(str)
-        return jsonify(data.to_dict(orient="records"))
-    
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-if __name__ == "__main__":
-    app.run(debug=True)
