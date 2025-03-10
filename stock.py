@@ -1,78 +1,109 @@
-@app.route("/")
-def home():
-    return """<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>NIFTY 50 Stock Chart</title>
-        <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-        <style>
-            select { padding: 10px; margin: 20px; } /* Moved CSS into <style> */
-        </style>
-    </head>
-    <body>
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from textblob import TextBlob
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-        <h2>NIFTY 50 Stock Prices</h2>
+# ✅ Load Stock Data
+@st.cache_data
+def load_stock_data():
+    return pd.read_csv("stocks.csv")  # Ensure your CSV contains "Stock", "Date", "Close", "News"
 
-        <label for="stockSelect">Select Stock:</label>
-        <select id="stockSelect" onchange="loadStockData()"></select>
+stocks_df = load_stock_data()
 
-        <canvas id="stockChart"></canvas>
+# ✅ Get Stock Details
+def get_stock_details(stock_name):
+    stock_data = stocks_df[stocks_df["Stock"].str.contains(stock_name, case=False, na=False)]
+    return stock_data if not stock_data.empty else None
 
-        <script>
-            let stockChart;
+# ✅ Sentiment Analysis on Stock News
+def analyze_sentiment(text):
+    return TextBlob(text).sentiment.polarity if text else 0
 
-            document.addEventListener("DOMContentLoaded", function () {
-                loadStockList();
-            });
+# ✅ Recommend Similar Stocks
+def recommend_stocks(stock_name, num_recommendations=5):
+    vectorizer = TfidfVectorizer(stop_words="english")
+    tfidf_matrix = vectorizer.fit_transform(stocks_df.groupby("Stock")["News"].apply(lambda x: " ".join(x)).fillna(""))
+    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
 
-            async function loadStockList() {
-                const response = await fetch("/stocks");
-                const stocks = await response.json();
-                const select = document.getElementById("stockSelect");
+    idx = stocks_df[stocks_df["Stock"].str.contains(stock_name, case=False, na=False)].index
+    if not idx.empty:
+        idx = idx[0]
+        sim_scores = sorted(
+            list(enumerate(cosine_sim[idx])), key=lambda x: x[1], reverse=True
+        )[1:num_recommendations + 1]
+        return [stocks_df.iloc[i[0]]["Stock"] for i in sim_scores]
 
-                stocks.forEach(stock => {
-                    const option = document.createElement("option");
-                    option.value = stock;
-                    option.textContent = stock;
-                    select.appendChild(option);
-                });
+    return []
 
-                loadStockData();  // Load first stock on page load
-            }
-
-            async function loadStockData() {
-                const stock = document.getElementById("stockSelect").value;
-                const response = await fetch(`/stock/${stock}`);
-                const data = await response.json();
-
-                if (!data || data.error) {
-                    alert(data.error || "No data found!");
-                    return;
-                }
-
-                const dates = data.map(item => item.Date);
-                const prices = data.map(item => item.Close);
-
-                if (stockChart) stockChart.destroy(); // Remove previous chart
-
-                const ctx = document.getElementById("stockChart").getContext("2d");
-                stockChart = new Chart(ctx, {
-                    type: "line",
-                    data: {
-                        labels: dates,
-                        datasets: [{
-                            label: stock + " Closing Price",
-                            data: prices,
-                            borderColor: "blue",
-                            fill: false
-                        }]
-                    }
-                });
-            }
-        </script>
-
-    </body>
-    </html>
+# ✅ Custom CSS for UI Styling
+st.markdown(
     """
+    <style>
+        body { background-color: #f5f5f5; }
+        .main { background-color: white; padding: 20px; border-radius: 10px; }
+        h1 { color: #007BFF; text-align: center; }
+        .stButton>button { background-color: #007BFF; color: white; font-weight: bold; }
+        .stTextInput>div>div>input { border-radius: 10px; padding: 10px; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ✅ Streamlit UI
+st.title("📈 AI-Powered Stock Analysis")
+st.subheader("Check stock trends, analyze news sentiment & find similar stocks!")
+
+# ✅ User Input
+stock_name = st.text_input("🔍 Enter a stock name", "")
+
+if st.button("🔎 Search"):
+    with st.spinner("Fetching stock details..."):
+        if stock_name:
+            stock_data = get_stock_details(stock_name)
+
+            if stock_data is not None:
+                st.success("✅ Stock Found!")
+
+                # ✅ Display Stock Chart
+                st.subheader(f"📊 {stock_name} Price Trend")
+                fig, ax = plt.subplots()
+                stock_data["Date"] = pd.to_datetime(stock_data["Date"])
+                stock_data = stock_data.sort_values("Date")
+                ax.plot(stock_data["Date"], stock_data["Close"], marker="o", linestyle="-", color="blue")
+                ax.set_xlabel("Date")
+                ax.set_ylabel("Closing Price")
+                ax.set_title(f"{stock_name} Stock Price Over Time")
+                plt.xticks(rotation=45)
+                st.pyplot(fig)
+
+                # ✅ Display Latest News
+                latest_news = stock_data.iloc[-1]["News"]
+                st.subheader("📰 Latest Stock News")
+                st.write(f"**{latest_news}**")
+
+                # ✅ Sentiment Analysis
+                sentiment_score = analyze_sentiment(latest_news)
+                st.write(f"**📝 Sentiment Score:** {sentiment_score:.2f}")
+
+                # ✅ Recommend Similar Stocks
+                similar_stocks = recommend_stocks(stock_name)
+                if similar_stocks:
+                    st.subheader("📌 Similar Stocks")
+                    st.write(", ".join(similar_stocks))
+                else:
+                    st.write("❌ No similar stocks found.")
+
+            else:
+                st.error("❌ Stock not found! Showing similar stocks...")
+                similar_stocks = recommend_stocks(stock_name)
+                if similar_stocks:
+                    st.write("📌 Recommended Similar Stocks:")
+                    st.write(", ".join(similar_stocks))
+                else:
+                    st.write("❌ No recommendations available.")
+
+        else:
+            st.warning("⚠️ Please enter a stock name.")
